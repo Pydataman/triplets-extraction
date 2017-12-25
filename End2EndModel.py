@@ -6,10 +6,17 @@ import numpy as np
 from PrecessEEdata import get_data_e2e
 from Evaluate import evaluavtion_triple
 from keras.models import Sequential
+import keras.backend as K
 from keras.layers.embeddings import Embedding
 from keras.layers.recurrent import LSTM
 from keras.layers.core import  TimeDistributedDense, Dropout, Activation,Merge
 from decodelayer import ReverseLayer2,LSTMDecoder_tag
+
+def xi_loss(y_true, y_pred):
+    print('param1: {}, param2: {}'.format(y_true, y_pred))
+    # import pdb; pdb.set_trace()
+    return K.mean(K.equal(y_true, y_pred))
+    # arr = np.random.rand(y_true.output_dim[0])
 
 def get_training_batch_xy_bias(inputsX, inputsY, max_s, max_t,
                           batchsize, vocabsize, target_idex_word,lossnum,shuffle=False):
@@ -41,7 +48,7 @@ def save_model(nn_model, NN_MODEL_PATH):
     nn_model.save_weights(NN_MODEL_PATH, overwrite=True)
 
 def creat_binary_tag_LSTM( sourcevocabsize,targetvocabsize, source_W,input_seq_lenth ,output_seq_lenth ,
-    hidden_dim ,emd_dim,loss='categorical_crossentropy',optimizer = 'rmsprop'):
+    hidden_dim ,emd_dim, loss='categorical_crossentropy',optimizer = 'rmsprop'):
     encoder_a = Sequential()
     encoder_b = Sequential()
     encoder_c = Sequential()
@@ -73,7 +80,11 @@ def creat_binary_tag_LSTM( sourcevocabsize,targetvocabsize, source_W,input_seq_l
     Model.add(decodelayer)
     Model.add(TimeDistributedDense(targetvocabsize+1))
     Model.add(Activation('softmax'))
-    Model.compile(loss=loss, optimizer=optimizer)
+    Model.compile(
+        loss=loss, 
+        # loss=xi_loss,
+        optimizer=optimizer,
+    )
     return Model
 
 
@@ -127,7 +138,7 @@ def test_model(nn_model,testdata,index2word,resultfile=''):
 
 
 def train_e2e_model(eelstmfile, modelfile,resultdir,npochos,
-                    lossnum=1,batch_size = 50,retrain=False):
+                    lossnum=1,batch_size = 1024,retrain=False):
 
     # load training data and test data
     traindata, testdata, source_W, source_vob, sourc_idex_word, target_vob, target_idex_word, max_s, k \
@@ -137,6 +148,9 @@ def train_e2e_model(eelstmfile, modelfile,resultdir,npochos,
     x_train = np.asarray(traindata[0], dtype="int32")
     y_train = np.asarray(traindata[1], dtype="int32")
 
+    # x_train = x_train[:100000]
+    # y_train = y_train[:100000]
+    
     nn_model = creat_binary_tag_LSTM(sourcevocabsize=len(source_vob), targetvocabsize=len(target_vob),
                                     source_W=source_W, input_seq_lenth=max_s, output_seq_lenth=max_s,
                                     hidden_dim=k, emd_dim=k)
@@ -149,20 +163,25 @@ def train_e2e_model(eelstmfile, modelfile,resultdir,npochos,
     maxF=0
     while (epoch < npochos):
         epoch = epoch + 1
+        batch_count = 0
         for x, y in get_training_batch_xy_bias(x_train, y_train, max_s, max_s,
                                           batch_size, len(target_vob),
                                             target_idex_word,lossnum,shuffle=True):
+            batch_count += 1
+            print('ah! Im at epoch {} batch index {}'.format(epoch, batch_count))
             nn_model.fit(x, y, batch_size=batch_size,
-                         nb_epoch=1, show_accuracy=False, verbose=0)
+                         nb_epoch=1, show_accuracy=True, verbose=0)
             if epoch > saveepoch:
                 saveepoch += save_inter
                 resultfile = resultdir+"result-"+str(saveepoch)
-                P, R, F, pre1, rre1, fe1, pre2, rre2, fe2, tp1f, tp2f\
+                # P, R, F, pre1, rre1, fe1, pre2, rre2, fe2, tp1f, tp2f\
+                P, R, F \
                     = test_model(nn_model, testdata, target_idex_word,resultfile)
                 if F > maxF:
                     maxF=F
                     save_model(nn_model, modelfile)
-                print P, R, F, pre1, rre1, fe1, pre2, rre2, fe2, tp1f, tp2f
+                # print P, R, F, pre1, rre1, fe1, pre2, rre2, fe2, tp1f, tp2f
+                print P, R, F # , pre1, rre1, fe1, pre2, rre2, fe2, tp1f, tp2f
     return nn_model
 
 def infer_e2e_model(eelstmfile, lstm_modelfile,resultfile):
@@ -200,12 +219,12 @@ if __name__=="__main__":
         print "Lstm data has extisted: "+e2edatafile
         print "Training EE model...."
         train_e2e_model(e2edatafile, modelfile,resultdir,
-                     npochos=100,lossnum=alpha,retrain=False)
+                     npochos=10,lossnum=alpha,retrain=False)
     else:
         if retrain:
             print "ReTraining EE model...."
             train_e2e_model(e2edatafile, modelfile, resultdir,
-                         npochos=100,lossnum=alpha,retrain=retrain)
+                         npochos=10,lossnum=alpha,retrain=retrain)
 
 
 
